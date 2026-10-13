@@ -1,0 +1,23 @@
+universe:
+  tickers: ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+  start_date: "2020-01-01"
+  end_date: null          # null = fetch up to the latest available date
+  cache_dir: "data/cache"
+
+# Must sum to 1.0
+factor_weights:
+  momentum: 0.50
+  volatility: 0.30
+  zscore: 0.20
+
+rebalance:
+  frequency: "monthly"    # one of: daily, weekly, monthly, quarterly
+  lookback_days: 252
+  transaction_cost_bps: 10.0
+
+portfolio:
+  top_k: 3                       # number of top-ranked assets to hold
+  weighting_scheme: "equal"      # one of: equal, inverse_volatility
+
+logging:
+  level: "INFO"
