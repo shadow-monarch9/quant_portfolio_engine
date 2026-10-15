@@ -21,3 +21,9 @@ portfolio:
 
 logging:
   level: "INFO"
+
+agent:
+  model: "claude-sonnet-5-5"
+  max_tokens: 2000
+  max_attempts: 3          # generate + self-heal rounds per request
+  sandbox_timeout_s: 60    # wall-clock limit for the pytest subprocess

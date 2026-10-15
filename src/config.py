@@ -75,6 +75,13 @@ class LoggingConfig(BaseModel):
     level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
 
+class AgentConfig(BaseModel):
+    model: str = "claude-sonnet-5-5"
+    max_tokens: int = Field(default=2000, gt=0)
+    max_attempts: int = Field(default=3, ge=1)
+    sandbox_timeout_s: int = Field(default=60, gt=0)
+
+
 class Settings(BaseSettings):
     """Root settings object populated from the YAML config file."""
 
@@ -85,6 +92,7 @@ class Settings(BaseSettings):
     rebalance: RebalanceConfig
     portfolio: PortfolioConfig = PortfolioConfig(top_k=3, weighting_scheme="equal")
     logging: LoggingConfig = LoggingConfig()
+    agent: AgentConfig = AgentConfig()
 
     @classmethod
     def settings_customise_sources(
