@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +13,8 @@ import yfinance as yf  # type: ignore[import-untyped]
 from src.config import Settings, get_settings
 from src.data.schemas import PriceMatrixSchema
 from src.utils.logger import logger, setup_logger
+
+_MAX_FETCH_ATTEMPTS = 3
 
 
 class YahooDataLoader:
@@ -51,10 +54,11 @@ class YahooDataLoader:
         if path.exists() and not force_refresh:
             logger.info("Loading cached prices from {}", path)
             prices = pd.read_parquet(path)
+            if prices.empty:
+                logger.warning("Cached price matrix at {} is empty; refetching", path)
+                prices = self._fetch_clean_and_cache(path)
         else:
-            ohlcv = self._fetch()
-            prices = self._clean(ohlcv)
-            self._write_cache(prices, path)
+            prices = self._fetch_clean_and_cache(path)
         validated: pd.DataFrame = PriceMatrixSchema.validate(prices)
         logger.success(
             "Price matrix validated: {} rows x {} tickers ({} -> {})",
@@ -64,6 +68,23 @@ class YahooDataLoader:
             validated.index.max().date(),
         )
         return validated
+
+    def _fetch_clean_and_cache(self, path: Path) -> pd.DataFrame:
+        """Fetch with retries; never cache (or return) an empty/incomplete matrix."""
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+            try:
+                prices = self._clean(self._fetch())
+                if prices.empty:
+                    raise RuntimeError("Aligned price matrix is empty after cleaning")
+            except RuntimeError as exc:
+                last_error = exc
+                logger.warning("Fetch attempt {}/{} failed: {}", attempt, _MAX_FETCH_ATTEMPTS, exc)
+                time.sleep(2.0 * attempt)
+                continue
+            self._write_cache(prices, path)
+            return prices
+        raise RuntimeError(f"Could not load prices after {_MAX_FETCH_ATTEMPTS} attempts") from last_error
 
     def _fetch(self) -> pd.DataFrame:
         logger.info(
@@ -79,7 +100,7 @@ class YahooDataLoader:
             auto_adjust=True,
             progress=False,
             group_by="column",
-            threads=True,
+            threads=False,  # parallel threads contend for yfinance's SQLite cache ("database is locked")
         )
         if raw is None or raw.empty:
             raise RuntimeError("yfinance returned no data for the requested universe")
@@ -98,6 +119,9 @@ class YahooDataLoader:
             raise RuntimeError(f"No data returned for tickers: {missing}")
 
         prices = prices[self.tickers]
+        empty = [t for t in self.tickers if prices[t].isna().all()]
+        if empty:
+            raise RuntimeError(f"No usable prices for tickers: {empty}")
         index = pd.DatetimeIndex(prices.index)
         if index.tz is not None:
             index = index.tz_localize(None)
