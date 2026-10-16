@@ -101,3 +101,27 @@ def test_no_apply_button_when_history_is_insufficient(monkeypatch: pytest.Monkey
     at = _run_app(monkeypatch, _synthetic_prices(150))
     assert any("Insufficient History" in sub.value for sub in at.subheader)
     assert _apply_buttons(at) == []
+
+
+def test_banner_switches_to_aligned_state_after_apply(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, _synthetic_prices(400))
+    assert len(_apply_buttons(at)) == 1
+    assert not any("fully aligned" in s.value for s in at.success)
+
+    next(b for b in at.button if b.label == APPLY_LABEL).click().run()
+
+    assert not at.exception
+    assert any("fully aligned" in s.value for s in at.success)
+    assert any("Strategy Active" in m.value for m in at.markdown)
+    assert _apply_buttons(at) == []
+
+
+def test_banner_reverts_when_a_slider_leaves_the_preset(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, _synthetic_prices(400))
+    next(b for b in at.button if b.label == APPLY_LABEL).click().run()
+    assert _apply_buttons(at) == []
+
+    at.slider(key="top_k").set_value(5).run()
+
+    assert not any("fully aligned" in s.value for s in at.success)
+    assert len(_apply_buttons(at)) == 1

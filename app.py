@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
@@ -47,6 +48,18 @@ def apply_regime_preset(preset: dict[str, float]) -> None:
     st.session_state["top_k"] = int(preset["top_k"])
 
 
+def is_preset_active(preset: dict[str, float]) -> bool:
+    """True when the live slider values already equal the recommended preset."""
+    state = st.session_state
+    return (
+        all(
+            math.isclose(float(state[f"{name}_weight"]), preset[name], abs_tol=0.005)
+            for name in ("momentum", "volatility", "zscore")
+        )
+        and int(state["top_k"]) == int(preset["top_k"])
+    )
+
+
 def render_regime_banner(prices: pd.DataFrame) -> None:
     analysis = RegimeDetector.analyze(equal_weight_benchmark(prices))
     preset: dict[str, float] = analysis["preset"]
@@ -59,11 +72,18 @@ def render_regime_banner(prices: pd.DataFrame) -> None:
         cols[0].metric("Benchmark level", f"{analysis['current_price']:.2f}")
         cols[1].metric("200-day SMA", f"{analysis['sma_200']:.2f}")
         cols[2].metric("30-day volatility (ann.)", f"{analysis['rolling_vol']:.1%}")
-        st.info(
-            f"{analysis['suggestion']}\n\n"
-            f"Preset: momentum {preset['momentum']:.0%}, volatility {preset['volatility']:.0%}, "
+        preset_text = (
+            f"momentum {preset['momentum']:.0%}, volatility {preset['volatility']:.0%}, "
             f"z-score {preset['zscore']:.0%}, top-K {int(preset['top_k'])}"
         )
+        if is_preset_active(preset):
+            st.success(
+                "✅ Active Factor Strategy is fully aligned with the detected Market Regime.\n\n"
+                f"Active weights: {preset_text}"
+            )
+            st.badge(f"{analysis['regime']} Strategy Active", color="green")
+            return
+        st.info(f"{analysis['suggestion']}\n\nPreset: {preset_text}")
         st.button(
             "Apply Recommended Factor Preset",
             on_click=apply_regime_preset,
