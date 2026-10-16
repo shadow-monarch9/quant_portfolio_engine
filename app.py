@@ -109,7 +109,7 @@ def render_dashboard(
         rebalance_frequency=params.rebalance_frequency,
         transaction_cost_bps=params.transaction_cost_bps,
     )
-    if result.strategy_returns.empty:
+    if result.strategy_returns.empty or scores.dropna(how="all").empty:
         st.warning("Not enough history to clear the 252-day burn-in.")
         return
     stats = calculate_performance_metrics(result.strategy_returns, result.benchmark_returns)

@@ -111,3 +111,45 @@ def test_exactly_200_points_is_enough() -> None:
     np.random.seed(4)
     result = RegimeDetector.analyze(_prices_from_returns(np.random.normal(0.001, 0.005, 200)))
     assert result["regime"] != "Insufficient History"
+
+
+# --- Boundary behaviour ------------------------------------------------------------------
+
+
+def test_history_boundary_199_vs_200() -> None:
+    np.random.seed(5)
+    returns = np.random.normal(0.001, 0.005, 200)
+    assert RegimeDetector.analyze(_prices_from_returns(returns[:199]))["regime"] == (
+        "Insufficient History"
+    )
+    assert RegimeDetector.analyze(_prices_from_returns(returns))["regime"] != "Insufficient History"
+
+
+def test_price_equal_to_sma_is_not_bull() -> None:
+    flat = pd.Series(100.0, index=pd.bdate_range("2022-01-03", periods=N_DAYS))
+    result = RegimeDetector.analyze(flat)
+    assert result["current_price"] == result["sma_200"]
+    assert result["rolling_vol"] == 0.0
+    assert "Neutral" in result["regime"]
+
+
+def test_volatility_exactly_at_threshold_is_not_high(
+    bull_prices: pd.Series, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vol = RegimeDetector.analyze(bull_prices)["rolling_vol"]
+    monkeypatch.setattr("src.agent.regime.HIGH_VOL_THRESHOLD", vol)
+    assert "Strong Bull" in RegimeDetector.analyze(bull_prices)["regime"]  # strict ">"
+    monkeypatch.setattr("src.agent.regime.HIGH_VOL_THRESHOLD", vol - 1e-9)
+    assert "High Volatility" in RegimeDetector.analyze(bull_prices)["regime"]
+
+
+def test_nan_values_are_ignored(bull_prices: pd.Series) -> None:
+    with_nan = bull_prices.copy()
+    with_nan.iloc[[10, 50, 120]] = np.nan
+    assert RegimeDetector.analyze(with_nan)["regime"] != "Insufficient History"
+
+
+def test_empty_series_returns_fallback() -> None:
+    result = RegimeDetector.analyze(pd.Series(dtype=float))
+    assert result["regime"] == "Insufficient History"
+    assert np.isnan(result["current_price"])
