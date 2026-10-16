@@ -10,9 +10,10 @@ import streamlit as st
 
 from src.agent.factor_generator import GenerationResult
 from src.agent.orchestrator import AgentOrchestrator, AgentTurn, BacktestParams
+from src.agent.regime import RegimeDetector, equal_weight_benchmark
 from src.backtest.engine import run_strategy
 from src.backtest.metrics import calculate_performance_metrics
-from src.config import get_settings
+from src.config import Settings, get_settings
 from src.data.yahoo_loader import YahooDataLoader
 from src.portfolio.optimizer import WeightingScheme
 
@@ -23,6 +24,51 @@ SCHEMES: list[str] = ["equal", "inverse_volatility"]
 @st.cache_data(show_spinner="Loading prices...")
 def load_prices() -> pd.DataFrame:
     return YahooDataLoader.from_settings(get_settings()).load()
+
+
+def init_slider_state(settings: Settings) -> None:
+    """Seed slider session-state keys once so presets can overwrite them before widgets render."""
+    weights = settings.factor_weights
+    defaults: dict[str, float | int] = {
+        "momentum_weight": float(weights.momentum),
+        "volatility_weight": float(weights.volatility),
+        "zscore_weight": float(weights.zscore),
+        "top_k": min(max(settings.portfolio.top_k, 1), 5),
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+def apply_regime_preset(preset: dict[str, float]) -> None:
+    """Button callback: runs before the rerun, so it may set keys of widgets already rendered."""
+    st.session_state["momentum_weight"] = float(preset["momentum"])
+    st.session_state["volatility_weight"] = float(preset["volatility"])
+    st.session_state["zscore_weight"] = float(preset["zscore"])
+    st.session_state["top_k"] = int(preset["top_k"])
+
+
+def render_regime_banner(prices: pd.DataFrame) -> None:
+    analysis = RegimeDetector.analyze(equal_weight_benchmark(prices))
+    preset: dict[str, float] = analysis["preset"]
+    with st.container(border=True):
+        st.subheader(f"Market regime: {analysis['regime']}")
+        st.write(analysis["summary"])
+        if not preset:
+            return
+        cols = st.columns(3)
+        cols[0].metric("Benchmark level", f"{analysis['current_price']:.2f}")
+        cols[1].metric("200-day SMA", f"{analysis['sma_200']:.2f}")
+        cols[2].metric("30-day volatility (ann.)", f"{analysis['rolling_vol']:.1%}")
+        st.info(
+            f"{analysis['suggestion']}\n\n"
+            f"Preset: momentum {preset['momentum']:.0%}, volatility {preset['volatility']:.0%}, "
+            f"z-score {preset['zscore']:.0%}, top-K {int(preset['top_k'])}"
+        )
+        st.button(
+            "Apply Recommended Factor Preset",
+            on_click=apply_regime_preset,
+            args=(preset,),
+        )
 
 
 def equity_chart(strategy: pd.Series, benchmark: pd.Series) -> go.Figure:
@@ -185,16 +231,16 @@ def main() -> None:
     st.title("Quant Portfolio Engine")
 
     prices = load_prices()
-    default_weights = settings.factor_weights
+    init_slider_state(settings)
 
     with st.sidebar:
         st.header("Factor weights")
-        w_mom = st.slider("Momentum", 0.0, 1.0, float(default_weights.momentum), 0.05)
-        w_vol = st.slider("Volatility", 0.0, 1.0, float(default_weights.volatility), 0.05)
-        w_z = st.slider("Z-Score", 0.0, 1.0, float(default_weights.zscore), 0.05)
+        w_mom = st.slider("Momentum", 0.0, 1.0, step=0.05, key="momentum_weight")
+        w_vol = st.slider("Volatility", 0.0, 1.0, step=0.05, key="volatility_weight")
+        w_z = st.slider("Z-Score", 0.0, 1.0, step=0.05, key="zscore_weight")
 
         st.header("Portfolio")
-        top_k = st.slider("Top-K holdings", 1, 5, min(max(settings.portfolio.top_k, 1), 5))
+        top_k = st.slider("Top-K holdings", 1, 5, key="top_k")
         scheme = st.selectbox(
             "Weighting scheme", SCHEMES, index=SCHEMES.index(settings.portfolio.weighting_scheme)
         )
@@ -228,6 +274,8 @@ def main() -> None:
         rebalance_frequency=frequency,
         transaction_cost_bps=cost_bps,
     )
+
+    render_regime_banner(prices)
 
     dashboard_tab, agent_tab = st.tabs(
         ["📊 Quant Engine Dashboard", "🤖 AI Factor Studio & Agent Chat"]
